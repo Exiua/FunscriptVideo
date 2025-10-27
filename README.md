@@ -286,9 +286,7 @@ A container is **invalid** if any of the following conditions are true:
 ```json
 {
   "format_version": "1.0.0",
-  "title": "Simple FSV Example",
-  "creators": { "videos": [], "scripts": [] },
-  "video_formats": [{ "name": "video.mp4", "description": "Main video" }],
-  "script_variants": [{ "name": "Main", "description": "Default script" }]
+  "video_formats": [{ "name": "video.mp4" }],
+  "script_variants": [{ "name": "Main" }]
 }
 ```
