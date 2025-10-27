@@ -7,10 +7,34 @@ pub struct FsvMetadata {
     pub format_version: Version,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub title: String,
+    #[serde(default)]
     pub creators: CreatorsMetadata,
     pub video_formats: Vec<VideoFormat>,
     pub script_variants: Vec<ScriptVariant>,
+    #[serde(default)]
+    pub subtitle_tracks: Vec<SubtitleTrack>,
+}
+
+impl CreatorsMetadata {
+    pub fn new() -> Self {
+        CreatorsMetadata {
+            videos: Vec::new(),
+            scripts: Vec::new(),
+            subtitles: Vec::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.videos.is_empty() && self.scripts.is_empty() && self.subtitles.is_empty()
+    }
+}
+
+impl Default for CreatorsMetadata {
+    fn default() -> Self {
+        CreatorsMetadata::new()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +59,12 @@ pub struct CreatorInfo {
     pub name: String,
     #[serde(default)]
     pub socials: Vec<String>,
+}
+
+impl CreatorInfo {
+    pub fn new(name: String, socials: Vec<String>) -> Self {
+        CreatorInfo { name, socials }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
