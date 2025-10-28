@@ -126,16 +126,12 @@
             "name": "English.srt",
             "language": "en",
             "description": "English subtitles",
-            "duration": 123456,
-            "start_offset": 0,
             "checksum": "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
         },
         {
             "name": "Spanish.smi",
             "language": "es",
             "description": "Spanish subtitles",
-            "duration": 123456,
-            "start_offset": 0,
             "checksum": "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
         }
     ]

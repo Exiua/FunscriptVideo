@@ -191,12 +191,9 @@ Each subtitle entry corresponds to a single subtitle or caption file (e.g., `.sr
 | `name`            | string  | Filename of the subtitle file inside the container. | ✅        |
 | `language`        | string  | ISO 639-1 language code (e.g., `"en"`, `"ja"`).     | ✅        |
 | `description`     | string  | Human-readable label (e.g., `"English subtitles"`). | ❌        |
-| `duration_ms`     | integer | Duration of the subtitle file in milliseconds.      | ❌        |
-| `start_offset_ms` | integer | Offset relative to the start of the primary video.  | ❌        |
 | `checksum`        | string  | Hash for integrity verification.                    | ❌        |
 
-Readers **SHOULD** select subtitle tracks by language preference,  
-and **MAY** ignore unsupported formats.
+Readers **SHOULD** select subtitle tracks by language preference, and **MAY** ignore unsupported formats.
 
 ---
 

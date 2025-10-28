@@ -1,28 +1,37 @@
-use std::path::PathBuf;
+use std::{path::{Path, PathBuf}, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
+use tokio::runtime::Runtime;
 use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, add_to_fsv}};
 
 #[derive(Parser, Debug)]
 #[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None)]
 struct Args {
-    #[arg(short, long, default_value = "stdout", help = "Logging mode: none, stdout, file, both")]
+    #[arg(short, long, global = true, default_value = "stdout", help = "Logging mode: none, stdout, file, both")]
     log_mode: LogMode,
+    /// Run in non-interactive mode (disable all user prompts)
+    #[arg(long, global = true, help = "Disable interactive prompts (for scripting or CI)")]
+    non_interactive: bool,
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Validate a FunscriptVideo file
     Validate {
         #[arg(help = "Path to the FunscriptVideo file to validate")]
         path: PathBuf,
     },
+    /// Create a new FunscriptVideo file
     Create {},
-    Add {},
+    #[command(subcommand)]
+    Add(AddCommands),
     Remove {},
+    /// Extract contents from a FunscriptVideo file
     Extract {
         #[arg(help = "Path to the FunscriptVideo file to extract from")]
         path: PathBuf,
@@ -34,7 +43,73 @@ enum Commands {
         )]
         output_dir: PathBuf,
     },
+    /// Display information about a FunscriptVideo file
     Info {},
+}
+
+#[derive(Subcommand, Debug)]
+enum AddCommands {
+    /// Add a creator_info record to the database or FSV, depending on arguments
+    #[command(subcommand)]
+    Creator(CreatorLocation),
+    /// Add a video file (with optional creator info) to an existing FSV container
+    Video {
+        #[arg(help = "Path to the FSV file to modify")]
+        fsv_path: PathBuf,
+        #[arg(help = "Path to the video file to add")]
+        video_path: PathBuf,
+        #[arg(long, help = "Optional creator key (must exist in DB)")]
+        creator_key: Option<String>,
+    },
+    /// Add a script file (with optional creator info) to an existing FSV container
+    Script {
+        #[arg(help = "Path to the FSV file to modify")]
+        fsv_path: PathBuf,
+        #[arg(help = "Path to the script file to add")]
+        script_path: PathBuf,
+        #[arg(long, help = "Optional creator key (must exist in DB)")]
+        creator_key: Option<String>,
+    },
+    /// Add a subtitle file (with optional creator info) to an existing FSV container
+    Subtitle {
+        #[arg(help = "Path to the FSV file to modify")]
+        fsv_path: PathBuf,
+        #[arg(help = "Path to the subtitle file to add")]
+        subtitle_path: PathBuf,
+        #[arg(long, help = "Optional creator key (must exist in DB)")]
+        creator_key: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum CreatorLocation {
+    Database {
+        #[arg(help = "Name of the creator")]
+        name: String,
+        #[arg(required = true, help = "Unique creator key/identifier")]
+        key: String,
+        #[arg(num_args = 0.., help = "List of social URLs (e.g. --socials twitter.com/foo patreon.com/foo)")]
+        socials: Vec<String>,
+    },
+    Fsv {
+        #[arg(help = "Path to the FSV file to modify")]
+        fsv_path: PathBuf,
+        #[arg(help = "Type of work to associate the creator with")]
+        work_type: WorkType,
+        #[arg(short, long, required = true, help = "Creator key/identifier")]
+        creator_key: String,
+        #[arg(short, long, required = true, help = "Name of the created work")]
+        work_name: String,
+        #[arg(short, long, default_value = "", help = "Source URL")]
+        source_url: String,
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum WorkType {
+    Video,
+    Script,
+    Subtitle,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -103,17 +178,46 @@ fn configure_logging(app_name: &str, mode: LogMode) -> WorkerGuard {
     _guard
 }
 
-fn main() {
+fn main() -> ExitCode {
     let args = Args::parse();
     let _guard = configure_logging("funscripvideo-cli", args.log_mode);
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build();
+    if result.is_err() {
+        error!("Failed to create Tokio runtime: {}", result.err().unwrap());
+        return ExitCode::FAILURE;
+    }
+
+    let executable_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+    if executable_dir.is_none() {
+        error!("Failed to determine executable directory.");
+        return ExitCode::FAILURE;
+    }
+
+    let executable_dir = executable_dir.unwrap();
+    let database_path = executable_dir.join("funscripvideo.db");
+    let rt = result.unwrap();
+    let result = rt.block_on(DbClient::new(&database_path));
+    if result.is_err() {
+        error!("Failed to initialize database client: {}", result.err().unwrap());
+        return ExitCode::FAILURE;
+    }
+
+    let db_client = result.unwrap();
+    let interactive = !args.non_interactive;
     match args.command {
         Commands::Validate { path } => validate(&path),
         Commands::Create {} => create(),
-        Commands::Add {} => add(),
+        Commands::Add(add_cmd) => rt.block_on(add(add_cmd, &db_client, interactive)),
         Commands::Remove {} => remove(),
         Commands::Extract { path, output_dir } => extract(&path, &output_dir),
         Commands::Info {} => info(),
     }
+
+    ExitCode::SUCCESS
 }
 
 fn validate(path: &PathBuf) {
@@ -177,10 +281,36 @@ fn create() {
     todo!()
 }
 
-fn add() {
-    todo!()
+async fn add(cmd: AddCommands, db_client: &DbClient, interactive: bool) {
+    match cmd {
+        AddCommands::Creator(creator_location) => {
+            match creator_location {
+                CreatorLocation::Database { name, key, socials } => {
+                    let creator_info = FunScriptVideo::metadata::CreatorInfo::new(name, socials);
+                    let result = db_client.insert_creator_info(&key, &creator_info).await;
+                    match result {
+                        Ok(_) => info!("Creator info added to database successfully."),
+                        Err(err) => error!("Error adding creator info to database: {}", err),
+                    }
+                },
+                CreatorLocation::Fsv { fsv_path, work_type, creator_key, work_name, source_url } => todo!(),
+            }
+        },
+        AddCommands::Video { fsv_path, video_path, creator_key } => add_item_to_fsv(fsv_path, ItemType::Video, video_path, creator_key, db_client, interactive).await,
+        AddCommands::Script { fsv_path, script_path, creator_key } => add_item_to_fsv(fsv_path, ItemType::Script, script_path, creator_key, db_client, interactive).await,
+        AddCommands::Subtitle { fsv_path, subtitle_path, creator_key } => add_item_to_fsv(fsv_path, ItemType::Subtitle, subtitle_path, creator_key, db_client, interactive).await,
+    }
 }
 
+async fn add_item_to_fsv(fsv_path: PathBuf, item_type: ItemType, item_path: PathBuf, creator_key: Option<String>, db_client: &DbClient, interactive: bool) {
+    let args = AddArgs::new(fsv_path, item_type, item_path, creator_key);
+    let result = add_to_fsv(args, db_client, interactive).await;
+    match result {
+        Ok(_) => info!("{} added to FSV file successfully.", item_type.get_name()),
+        Err(err) => error!("Error adding {} to FSV file: {}", item_type.get_name(), err),
+    }
+}
+    
 fn remove() {
     todo!()
 }

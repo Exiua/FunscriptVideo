@@ -1,9 +1,11 @@
-use std::{collections::HashSet, io::Read, path::Path};
+use std::{collections::HashSet, io::{Read, Write}, path::{Path, PathBuf}};
 
+use clap::error;
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
+use zip::write::SimpleFileOptions;
 
-use crate::{metadata::FsvMetadata, semver::Version};
+use crate::{db_client::{self, DbClient}, file_util, metadata::{self, CreatorInfo, FsvMetadata, ScriptVariant, SubtitleTrack, VideoFormat, WorkCreatorsMetadata}, semver::Version};
 
 const LATEST_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
 const MINIMUM_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
@@ -389,4 +391,303 @@ pub enum FsvCreateError {
     Zip(#[from] zip::result::ZipError),
     #[error("JSON serialization error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+}
+
+// TODO: Implement FSV creation function
+
+#[derive(Debug, Error)]
+pub enum FsvAddError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("ZIP archive error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("JSON serialization error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+    #[error("Database client error: {0}")]
+    DbClient(#[from] db_client::DbClientError),
+    #[error("FSV error: {0}")]
+    Fsv(#[from] FsvError),
+    #[error("Get video duration error: {0}")]
+    GetVideoDuration(#[from] file_util::GetVideoDurationError),
+    #[error("Unable to get file name from path: {0}")]
+    UnableToGetFileName(std::path::PathBuf),
+    #[error("Creator info not found for key: {0}")]
+    CreatorInfoNotFound(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ItemType {
+    Video,
+    Script,
+    Subtitle,
+}
+
+impl ItemType {
+    pub fn get_name(&self) -> &str {
+        match self {
+            ItemType::Video => "Video",
+            ItemType::Script => "Script",
+            ItemType::Subtitle => "Subtitle",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AddArgs {
+    path: PathBuf,
+    item_type: ItemType,
+    item_path: PathBuf,
+    creator_key: Option<String>,
+}
+
+impl AddArgs {
+    pub fn new(path: PathBuf, item_type: ItemType, item_path: PathBuf, creator_key: Option<String>) -> Self {
+        AddArgs {
+            path,
+            item_type,
+            item_path,
+            creator_key,
+        }
+    }
+}
+
+pub async fn add_to_fsv(args: AddArgs, db_client: &DbClient, interactive: bool) -> Result<(), FsvAddError> {
+    let AddArgs { path, item_type, item_path, creator_key } = args;
+    let filname = item_path.file_name().and_then(|f| f.to_str()).ok_or_else(|| FsvAddError::UnableToGetFileName(item_path.to_path_buf()))?;
+    let content = std::fs::read(&item_path)?;
+    let hash = get_file_hash(&content);
+    let creator_info = if let Some(key) = creator_key {
+        let creator_info = db_client.get_creator_info_by_key(&key).await?;
+        if let Some(creator_info) = creator_info {
+            Some(creator_info)
+        }
+        else if interactive {
+            warn!("Creator with key '{}' not found in database; entering interactive mode.", key);
+            let creator_info = get_creator_info_from_user(db_client, Some(&key)).await?;
+            Some(creator_info)
+        }
+        else{
+            return Err(FsvAddError::CreatorInfoNotFound(key));
+        }
+    }
+    else {
+        None
+    };
+
+    let (archive, mut metadata) = open_fsv(&path)?;
+    match item_type {
+        ItemType::Video => {
+            for format in &metadata.video_formats {
+                if format.name == filname {
+                    warn!("Video format '{}' already exists in FSV, skipping addition", filname);
+                    return Ok(());
+                }
+            }
+            
+            // TODO: Add validation for video format (duration, checksum, etc.)
+
+            let video_duration = file_util::get_video_duration(&item_path)?;
+            if let Some(creator_info) = creator_info {
+                let work_info = WorkCreatorsMetadata::new(filname.to_string(), String::new(), creator_info);
+                metadata.add_video_creator(work_info);
+            }
+
+            let video_format = VideoFormat::new(filname.to_string(), String::new(), video_duration, 0, hash);
+            metadata.add_video_format(video_format);
+            let add_file = AddFile::new(filname, &item_path);
+            rebuild_archive(&path, archive, &metadata, vec![add_file], vec![])?;
+        },
+        ItemType::Script => {
+            for variant in &metadata.script_variants {
+                if variant.name == filname {
+                    warn!("Script variant '{}' already exists in FSV, skipping addition", filname);
+                    return Ok(());
+                }
+            }
+
+            // TODO: Add validation for script variant (duration, checksum, etc.)
+
+            if let Some(creator_info) = creator_info {
+                let work_info = WorkCreatorsMetadata::new(filname.to_string(), String::new(), creator_info);
+                metadata.add_script_creator(work_info);
+            }
+
+            let script_variant = ScriptVariant::new(filname.to_string(), String::new(), vec![], 0, 0, hash);
+            metadata.add_script_variant(script_variant);
+            let add_file = AddFile::new(filname, &item_path);
+            rebuild_archive(&path, archive, &metadata, vec![add_file], vec![])?;
+        },
+        ItemType::Subtitle => {
+            for track in &metadata.subtitle_tracks {
+                if track.name == filname {
+                    warn!("Subtitle track '{}' already exists in FSV, skipping addition", filname);
+                    return Ok(());
+                }
+            }
+
+            // TODO: Add validation for subtitle track (checksum, etc.)
+
+            if let Some(creator_info) = creator_info {
+                let work_info = WorkCreatorsMetadata::new(filname.to_string(), String::new(), creator_info);
+                metadata.add_subtitle_creator(work_info);
+            }
+
+            let subtitle_track = SubtitleTrack::new(filname.to_string(), String::new(), String::new(), hash);
+            metadata.add_subtitle_track(subtitle_track);
+            let add_file = AddFile::new(filname, &item_path);
+            rebuild_archive(&path, archive, &metadata, vec![add_file], vec![])?;
+        },
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Error)]
+pub enum FsvError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("ZIP archive error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("JSON deserialization error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+    #[error("Database client error: {0}")]
+    DbClient(#[from] db_client::DbClientError),
+    #[error("Metadata file not found in FSV archive")]
+    MetadataFileNotFound,
+}
+
+#[derive(Debug)]
+pub struct AddFile<'a> {
+    pub name: &'a str,
+    pub path: &'a Path,
+}
+
+impl<'a> AddFile<'a> {
+    pub fn new(name: &'a str, path: &'a Path) -> Self {
+        AddFile { name, path }
+    }
+}
+
+/// Rebuild the FSV archive with updated metadata and added/removed files (metadata is assumed to already have added/removed the relevant entries)
+fn rebuild_archive(archive_path: &Path, mut archive: zip::ZipArchive<std::fs::File>, metadata: &FsvMetadata, add_files: Vec<AddFile>, remove_files: Vec<&str>) -> Result<(), FsvError> {
+    let temp_path = archive_path.with_extension("tmp");
+    let temp_file = std::fs::File::create(&temp_path)?;
+    let mut zip_writer = zip::ZipWriter::new(temp_file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Bzip2);
+    // Write updated metadata.json
+    let metadata_json = serde_json::to_string_pretty(metadata)?;
+    zip_writer.start_file("metadata.json", options)?;
+    zip_writer.write_all(metadata_json.as_bytes())?;
+    // Copy existing files, skipping removed files
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let file_name = file.name();
+        if file_name == "metadata.json" || remove_files.contains(&file_name) {
+            continue; // skip metadata.json (already written) and removed files
+        }
+        zip_writer.start_file(file_name, options)?;
+        std::io::copy(&mut file, &mut zip_writer)?;
+    }
+
+    // Add new files
+    for file_path in add_files {
+        let mut file = std::fs::File::open(file_path.path)?;
+        zip_writer.start_file(file_path.name, options)?;
+        std::io::copy(&mut file, &mut zip_writer)?;
+    }
+
+    zip_writer.finish()?.flush()?;
+    drop(archive);
+    std::fs::rename(temp_path, archive_path)?;
+
+    Ok(())
+}
+
+fn open_fsv(path: &Path) -> Result<(zip::ZipArchive<std::fs::File>, FsvMetadata), FsvError> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let metadata_json = {
+        let result = archive.by_name("metadata.json");
+        let mut metadata_file = match result {
+            Ok(file) => file,
+            Err(zip_err) => {
+                match zip_err {
+                    zip::result::ZipError::FileNotFound => {
+                        return Err(FsvError::MetadataFileNotFound);
+                    }
+                    _ => {
+                        return Err(FsvError::Zip(zip_err));
+                    }
+                }
+            },
+        };
+        let mut metadata_json = String::new();
+        metadata_file.read_to_string(&mut metadata_json)?;
+
+        metadata_json
+    };
+
+    let metadata = serde_json::from_str::<FsvMetadata>(&metadata_json)?;
+
+    Ok((archive, metadata))
+}
+
+/// Prompt the user and return trimmed input
+fn prompt_input(prompt: &str) -> std::io::Result<String> {
+    print!("{}", prompt);
+    std::io::stdout().flush()?; // make sure the prompt appears immediately
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf)?;
+    Ok(buf.trim().to_string())
+}
+
+pub async fn get_creator_info_from_user(db_client: &DbClient, creator_key: Option<&str>) -> Result<CreatorInfo, FsvError> {
+    // Name (required)
+    let name = loop {
+        let input = prompt_input("Enter creator name: ")?;
+        if input.is_empty() {
+            println!("Name cannot be empty. Please try again.");
+        } else {
+            break input;
+        }
+    };
+
+    // Socials (comma-separated)
+    let socials_input = prompt_input("Enter creator socials (comma-separated): ")?;
+    let socials: Vec<String> = socials_input
+        .split(',')
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        })
+        .collect();
+
+    let creator_info = CreatorInfo::new(name, socials);
+
+    // Needed to resolve lifetime issues in else branch
+    let input_key;
+    // Save to DB if key provided or in interactive mode
+    let key = if let Some(key) = creator_key {
+        info!("Saving creator info with key '{}' to database.", key);
+        key
+    }
+    else{
+        // Optional DB save
+        input_key = prompt_input("Enter creator key (leave blank to skip saving to DB): ")?;
+        &input_key
+    };
+
+    if !key.is_empty() {
+        match db_client.insert_creator_info(&key, &creator_info).await {
+            Ok(_) => info!("Creator '{}' saved to database.", key),
+            Err(e) => error!("Failed to insert creator info: {}", e),
+        }
+    }
+
+    Ok(creator_info)
+}
+
+pub fn get_file_hash(data: &[u8]) -> String {
+    let hash = file_util::get_hash_string(data);
+    format!("sha256:{}", hash)
 }

@@ -17,23 +17,41 @@ pub struct FsvMetadata {
     pub subtitle_tracks: Vec<SubtitleTrack>,
 }
 
-impl CreatorsMetadata {
-    pub fn new() -> Self {
-        CreatorsMetadata {
-            videos: Vec::new(),
-            scripts: Vec::new(),
-            subtitles: Vec::new(),
+impl FsvMetadata {
+    pub fn new(format_version: Version) -> Self {
+        FsvMetadata {
+            format_version,
+            tags: Vec::new(),
+            title: String::new(),
+            creators: CreatorsMetadata::new(),
+            video_formats: Vec::new(),
+            script_variants: Vec::new(),
+            subtitle_tracks: Vec::new(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.videos.is_empty() && self.scripts.is_empty() && self.subtitles.is_empty()
+    pub fn add_video_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.creators.add_video_creator(work_creator);
     }
-}
 
-impl Default for CreatorsMetadata {
-    fn default() -> Self {
-        CreatorsMetadata::new()
+    pub fn add_script_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.creators.add_script_creator(work_creator);
+    }
+
+    pub fn add_subtitle_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.creators.add_subtitle_creator(work_creator);
+    }
+
+    pub fn add_video_format(&mut self, video_format: VideoFormat) {
+        self.video_formats.push(video_format);
+    }
+
+    pub fn add_script_variant(&mut self, script_variant: ScriptVariant) {
+        self.script_variants.push(script_variant);
+    }
+
+    pub fn add_subtitle_track(&mut self, subtitle_track: SubtitleTrack) {
+        self.subtitle_tracks.push(subtitle_track);
     }
 }
 
@@ -47,11 +65,53 @@ pub struct CreatorsMetadata {
     pub subtitles: Vec<WorkCreatorsMetadata>,
 }
 
+impl CreatorsMetadata {
+    pub fn new() -> Self {
+        CreatorsMetadata {
+            videos: Vec::new(),
+            scripts: Vec::new(),
+            subtitles: Vec::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.videos.is_empty() && self.scripts.is_empty() && self.subtitles.is_empty()
+    }
+
+    pub fn add_video_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.videos.push(work_creator);
+    }
+
+    pub fn add_script_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.scripts.push(work_creator);
+    }
+
+    pub fn add_subtitle_creator(&mut self, work_creator: WorkCreatorsMetadata) {
+        self.subtitles.push(work_creator);
+    }
+}
+
+impl Default for CreatorsMetadata {
+    fn default() -> Self {
+        CreatorsMetadata::new()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkCreatorsMetadata {
     pub work_name: String,
     pub source_url: String,
     pub creator_info: CreatorInfo,
+}
+
+impl WorkCreatorsMetadata {
+    pub fn new(work_name: String, source_url: String, creator_info: CreatorInfo) -> Self {
+        WorkCreatorsMetadata {
+            work_name,
+            source_url,
+            creator_info,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +140,18 @@ pub struct VideoFormat {
     pub checksum: String,
 }
 
+impl VideoFormat {
+    pub fn new(name: String, description: String, duration_ms: u64, start_offset_ms: u64, checksum: String) -> Self {
+        VideoFormat {
+            name,
+            description,
+            duration_ms,
+            start_offset_ms,
+            checksum,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScriptVariant {
     pub name: String,
@@ -95,6 +167,19 @@ pub struct ScriptVariant {
     pub checksum: String,
 }
 
+impl ScriptVariant {
+    pub fn new(name: String, description: String, additional_axes: Vec<String>, duration_ms: u64, start_offset_ms: u64, checksum: String) -> Self {
+        ScriptVariant {
+            name,
+            description,
+            additional_axes,
+            duration_ms,
+            start_offset_ms,
+            checksum,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubtitleTrack {
     pub name: String,
@@ -103,9 +188,16 @@ pub struct SubtitleTrack {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub duration_ms: u64,
-    #[serde(default)]
-    pub start_offset_ms: u64,
-    #[serde(default)]
     pub checksum: String,
+}
+
+impl SubtitleTrack {
+    pub fn new(name: String, language: String, description: String, checksum: String) -> Self {
+        SubtitleTrack {
+            name,
+            language,
+            description,
+            checksum,
+        }
+    }
 }
