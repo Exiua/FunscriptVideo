@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, add_creator_to_fsv, add_to_fsv}};
+use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, EntryType, add_creator_to_fsv, add_to_fsv}};
 
 #[derive(Parser, Debug)]
 #[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None)]
@@ -28,9 +28,18 @@ enum Commands {
     },
     /// Create a new FunscriptVideo file
     Create {},
+    /// Add an entry to a FunscriptVideo file
     #[command(subcommand)]
     Add(AddCommands),
-    Remove {},
+    /// Remove an entry from a FunscriptVideo file
+    Remove {
+        #[arg(help = "Path to the FunscriptVideo file to modify")]
+        path: PathBuf,
+        #[arg(help = "Type of entry to remove")]
+        entry_type: EntryType,
+        #[arg(help = "Identifier of the entry to remove (key for creator_info, filename for video/script/subtitle)")]
+        entry_id: String,
+    },
     /// Extract contents from a FunscriptVideo file
     Extract {
         #[arg(help = "Path to the FunscriptVideo file to extract from")]
@@ -205,7 +214,7 @@ fn main() -> ExitCode {
         Commands::Validate { path } => validate(&path),
         Commands::Create {} => create(),
         Commands::Add(add_cmd) => rt.block_on(add(add_cmd, &db_client, interactive)),
-        Commands::Remove {} => remove(),
+        Commands::Remove { path, entry_type, entry_id } => remove(&path, entry_type, entry_id),
         Commands::Extract { path, output_dir } => extract(&path, &output_dir),
         Commands::Info {} => info(),
     }
@@ -221,30 +230,10 @@ fn validate(path: &PathBuf) {
                 info!("FSV file is valid.");
             }
             FunScriptVideo::fsv::FsvState::ContentIncomplete(reason) => match reason {
-                FunScriptVideo::fsv::ContentIncompleteReason::UnableToReadVideo => {
-                    warn!("Unable to read video file.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::MissingVideoFile => {
-                    warn!("Missing video file.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::VideoPasswordProtected => {
-                    warn!("Video file is password protected.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::DuplicateVideoFormatEntry => {
-                    error!("Duplicate video format entry found.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::UnableToReadScript => {
-                    warn!("Unable to read script file.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::MissingScriptFile => {
-                    warn!("Missing script file.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::ScriptPasswordProtected => {
-                    warn!("Script file is password protected.");
-                }
-                FunScriptVideo::fsv::ContentIncompleteReason::DuplicateScriptVariantEntry => {
-                    error!("Duplicate script variant entry found.");
-                }
+                FunScriptVideo::fsv::ContentIncompleteReason::UnableToReadItem(item_type) => warn!("Unable to read {} file", item_type.get_name_lower()),
+                FunScriptVideo::fsv::ContentIncompleteReason::MissingItemFile(item_type) => warn!("Missing {} file in archive", item_type.get_name_lower()),
+                FunScriptVideo::fsv::ContentIncompleteReason::ItemPasswordProtected(item_type) => warn!("{} file is password protected", item_type.get_name()),
+                FunScriptVideo::fsv::ContentIncompleteReason::DuplicateItemEntry(item_type) => warn!("Duplicate {} entry in metadata", item_type.get_name_lower()),
             },
             FunScriptVideo::fsv::FsvState::MetadataInvalid(reason) => match reason {
                 FunScriptVideo::fsv::MetadataInvalidReason::InvalidFormatVersion => {
@@ -309,8 +298,8 @@ async fn add_item_to_fsv(fsv_path: PathBuf, item_type: ItemType, item_path: Path
         Err(err) => error!("Error adding {} to FSV file: {}", item_type.get_name(), err),
     }
 }
-    
-fn remove() {
+
+fn remove(path: &PathBuf, entry_type: EntryType, entry_id: String) {
     todo!()
 }
 

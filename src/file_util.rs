@@ -3,6 +3,8 @@ use std::{path::Path, process::Command, str::FromStr};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::funscript::Funscript;
+
 //const VIDEO_SIG: Map<u64, &'static str> 
 
 pub fn get_hash_string(data: &[u8]) -> String {
@@ -11,18 +13,22 @@ pub fn get_hash_string(data: &[u8]) -> String {
 }
 
 #[derive(Debug, Error)]
-pub enum GetVideoDurationError {
+pub enum GetDurationError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Parse float error: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    #[error("Serde JSON error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
     #[error("FFprobe error: {0}")]
     Ffprobe(String),
+    #[error("Funscript missing actions")]
+    FunscriptMissingActions,
 }
 
 /// Get video duration (in seconds) using `ffprobe`.
 /// Requires ffprobe to be installed and on PATH.
-pub fn get_video_duration<P: AsRef<Path>>(path: P) -> Result<u64, GetVideoDurationError> {
+pub fn get_video_duration<P: AsRef<Path>>(path: P) -> Result<u64, GetDurationError> {
     let output = Command::new("ffprobe")
         .args([
             "-v", "error",
@@ -34,7 +40,7 @@ pub fn get_video_duration<P: AsRef<Path>>(path: P) -> Result<u64, GetVideoDurati
         .output()?;
 
     if !output.status.success() {
-        return Err(GetVideoDurationError::Ffprobe(format!(
+        return Err(GetDurationError::Ffprobe(format!(
             "{}",
             String::from_utf8_lossy(&output.stderr)
         )));
@@ -50,3 +56,13 @@ pub fn get_video_duration<P: AsRef<Path>>(path: P) -> Result<u64, GetVideoDurati
     Ok(ms)
 }
 
+pub fn get_funscript_duration(funscript: &Funscript) -> Result<u64, GetDurationError> {
+    funscript.actions.iter().map(|a| a.at).max().ok_or(GetDurationError::FunscriptMissingActions)
+    // Metadata appears to store duration in seconds
+    // if let Some(metadata) = funscript.metadata {
+    //     Ok(metadata.duration)
+    // }
+    // else {
+    //     funscript.actions.iter().map(|a| a.at).max().ok_or(GetDurationError::FunscriptMissingActions)
+    // }
+}

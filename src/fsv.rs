@@ -1,14 +1,15 @@
 use std::{collections::HashSet, io::{Read, Write}, path::{Path, PathBuf}};
 
-use clap::{ValueEnum, error};
+use clap::ValueEnum;
 use thiserror::Error;
 use tracing::{error, info, warn};
 use zip::write::SimpleFileOptions;
 
-use crate::{db_client::{self, DbClient}, file_util, metadata::{self, CreatorInfo, FsvMetadata, ScriptVariant, SubtitleTrack, VideoFormat, WorkCreatorsMetadata}, semver::Version};
+use crate::{db_client::{self, DbClient}, file_util, funscript::Funscript, metadata::{CreatorInfo, FsvMetadata, ScriptVariant, SubtitleTrack, VideoFormat, WorkCreatorsMetadata, WorkItem}, semver::Version};
 
 const LATEST_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
 const MINIMUM_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
+const AXES: [&str; 7] = ["pitch", "roll", "suckManual", "surge", "sway", "twist", "valve"]; // TODO: Check if there are more axes in use
 
 #[derive(Debug, Error)]
 pub enum FsvExtractError {
@@ -212,14 +213,10 @@ pub enum FsvState {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ContentIncompleteReason {
-    UnableToReadVideo,
-    MissingVideoFile,
-    VideoPasswordProtected,
-    DuplicateVideoFormatEntry,
-    UnableToReadScript,
-    MissingScriptFile,
-    ScriptPasswordProtected,
-    DuplicateScriptVariantEntry,
+    UnableToReadItem(ItemType),
+    MissingItemFile(ItemType),
+    ItemPasswordProtected(ItemType),
+    DuplicateItemEntry(ItemType),
 }
 
 #[derive(Debug, Clone)]
@@ -318,67 +315,54 @@ pub fn validate_fsv(path: &Path) -> Result<FsvState, FsvValidationError> {
 
     // region Validate content files
 
-    let mut seen = HashSet::new();
-    for format in &metadata.video_formats {
-        let file_name = format.name.trim();
-        if file_name.is_empty() {
-            // Already warned above
-            //warn!("A video format has an empty file name");
-            continue;
-        }
-
-        if !seen.insert(file_name) {
-            error!("Duplicate video format entry found: {}", file_name);
-            return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::DuplicateVideoFormatEntry));
-        }
-
-        let result = archive.by_name(file_name);
-        match result {
-            Ok(_) => (),
-            Err(err) => {
-                match err {
-                    zip::result::ZipError::Io(_) => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::UnableToReadVideo)),
-                    zip::result::ZipError::FileNotFound => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::MissingVideoFile)),
-                    zip::result::ZipError::InvalidPassword => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::VideoPasswordProtected)),
-                    _ => return Err(FsvValidationError::Zip(err)),
-                }
-            },
-        }
-
-        // TODO: Validate duration and checksums if present
+    let state = validate_item_contents(ItemType::Video, &metadata.video_formats, &mut archive)?;
+    if !matches!(state, FsvState::Valid) {
+        return Ok(state);
     }
 
-    let mut seen = HashSet::new();
-    for variant in &metadata.script_variants {
-        let file_name = variant.name.trim();
-        if file_name.is_empty() {
-            // Already warned above
-            //warn!("A script variant has an empty file name");
-            continue;
-        }
+    let state = validate_item_contents(ItemType::Script, &metadata.script_variants, &mut archive)?;
+    if !matches!(state, FsvState::Valid) {
+        return Ok(state);
+    }
 
-        if !seen.insert(file_name) {
-            error!("Duplicate script variant entry found: {}", file_name);
-            return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::DuplicateScriptVariantEntry));
-        }
-
-        let result = archive.by_name(file_name);
-        match result {
-            Ok(_) => (),
-            Err(err) => {
-                match err {
-                    zip::result::ZipError::Io(_) => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::UnableToReadScript)),
-                    zip::result::ZipError::FileNotFound => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::MissingScriptFile)),
-                    zip::result::ZipError::InvalidPassword => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::ScriptPasswordProtected)),
-                    _ => return Err(FsvValidationError::Zip(err)),
-                }
-            },
-        }
-
-        // TODO: Validate duration and checksums if present
+    let state = validate_item_contents(ItemType::Subtitle, &metadata.subtitle_tracks, &mut archive)?;
+    if !matches!(state, FsvState::Valid) {
+        return Ok(state);
     }
 
     // endregion
+
+    Ok(FsvState::Valid)
+}
+
+fn validate_item_contents<Item: WorkItem>(item_type: ItemType, items: &Vec<Item>, archive: &mut zip::ZipArchive<std::fs::File>) -> Result<FsvState, FsvValidationError> {
+    // TODO: Maybe add Func for specific item validations
+    // TODO: Maybe improve return value to not be confused with caller's return value (mainly since FsvState::Valid doesn't make sense when a different item type may be invalid)
+    let mut seen = HashSet::new();
+    for item in items {
+        let file_name = item.get_name().trim();
+        if file_name.is_empty() {
+            warn!("A subtitle track has an empty file name");
+            continue;
+        }
+
+        if !seen.insert(file_name) {
+            warn!("Duplicate subtitle track entry found: {}", file_name);
+        }
+
+        let result = archive.by_name(file_name);
+        match result {
+            Ok(_) => (),
+            Err(err) => {
+                match err {
+                    zip::result::ZipError::Io(_) => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::UnableToReadItem(item_type))),
+                    zip::result::ZipError::FileNotFound => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::MissingItemFile(item_type))),
+                    zip::result::ZipError::InvalidPassword => return Ok(FsvState::ContentIncomplete(ContentIncompleteReason::ItemPasswordProtected(item_type))),
+                    _ => return Err(FsvValidationError::Zip(err)),
+                }
+            },
+        }
+    }
 
     Ok(FsvState::Valid)
 }
@@ -389,7 +373,7 @@ pub enum FsvCreateError {
     Io(#[from] std::io::Error),
     #[error("ZIP archive error: {0}")]
     Zip(#[from] zip::result::ZipError),
-    #[error("JSON serialization error: {0}")]
+    #[error("Serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
 }
 
@@ -401,14 +385,14 @@ pub enum FsvAddError {
     Io(#[from] std::io::Error),
     #[error("ZIP archive error: {0}")]
     Zip(#[from] zip::result::ZipError),
-    #[error("JSON serialization error: {0}")]
+    #[error("Serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Database client error: {0}")]
     DbClient(#[from] db_client::DbClientError),
     #[error("FSV error: {0}")]
     Fsv(#[from] FsvError),
     #[error("Get video duration error: {0}")]
-    GetVideoDuration(#[from] file_util::GetVideoDurationError),
+    GetVideoDuration(#[from] file_util::GetDurationError),
     #[error("Unable to get file name from path: {0}")]
     UnableToGetFileName(std::path::PathBuf),
     #[error("Creator info not found for key: {0}")]
@@ -428,6 +412,33 @@ impl ItemType {
             ItemType::Video => "Video",
             ItemType::Script => "Script",
             ItemType::Subtitle => "Subtitle",
+        }
+    }
+
+    pub fn get_name_lower(&self) -> &str {
+        match self {
+            ItemType::Video => "video",
+            ItemType::Script => "script",
+            ItemType::Subtitle => "subtitle",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum EntryType {
+    Creator,
+    Video,
+    Script,
+    Subtitle,
+}
+
+impl EntryType {
+    pub fn get_name(&self) -> &str {
+        match self {
+            EntryType::Creator => "Creator",
+            EntryType::Video => "Video",
+            EntryType::Script => "Script",
+            EntryType::Subtitle => "Subtitle",
         }
     }
 }
@@ -505,14 +516,15 @@ pub async fn add_to_fsv(args: AddArgs, db_client: &DbClient, interactive: bool) 
                 }
             }
 
-            // TODO: Add validation for script variant (duration, checksum, etc.)
-
+            let file_content = std::fs::read_to_string(&path)?;
+            let funscript = serde_json::from_str::<Funscript>(&file_content)?; // validates funscript structure
+            let script_duration = file_util::get_funscript_duration(&funscript)?;
             if let Some(creator_info) = creator_info {
                 let work_info = WorkCreatorsMetadata::new(filname.to_string(), String::new(), creator_info);
                 metadata.add_script_creator(work_info);
             }
 
-            let script_variant = ScriptVariant::new(filname.to_string(), String::new(), vec![], 0, 0, hash);
+            let script_variant = ScriptVariant::new(filname.to_string(), String::new(), vec![], script_duration, 0, hash);
             metadata.add_script_variant(script_variant);
             let add_file = AddFile::new(filname, &item_path);
             rebuild_archive(&path, archive, &metadata, vec![add_file], vec![])?;
@@ -559,6 +571,99 @@ pub async fn add_creator_to_fsv(fsv_path: &Path, work_type: ItemType, creator_ke
 
     rebuild_archive(fsv_path, archive, &metadata, vec![], vec![])?;
     
+    Ok(())
+}
+
+#[derive(Debug, Error)]
+pub enum FsvRemoveError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("ZIP archive error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("Serde json error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+    #[error("Database client error: {0}")]
+    DbClient(#[from] db_client::DbClientError),
+    #[error("FSV error: {0}")]
+    Fsv(#[from] FsvError),
+    #[error("Entry not found: {0}")]
+    EntryNotFound(String),
+}
+
+pub fn remove_from_fsv(path: &Path, entry_type: EntryType, entry_id: &str) -> Result<(), FsvRemoveError> {
+    let (archive, mut metadata) = open_fsv(path)?;
+    match entry_type {
+        EntryType::Creator => todo!(),
+        EntryType::Video => {
+            let mut found = false;
+            metadata.video_formats.retain(|format| {
+                if format.name == entry_id {
+                    found = true;
+                    false
+                }
+                else {
+                    true
+                }
+            });
+
+            if !found {
+                return Err(FsvRemoveError::EntryNotFound(entry_id.to_string()));
+            }
+
+            let remove_files = vec![entry_id];
+            rebuild_archive(path, archive, &metadata, vec![], remove_files)?;
+        },
+        EntryType::Script => {
+            let mut parts = entry_id.splitn(2, '.');
+            let stem = parts.next().unwrap_or(entry_id);
+            let ext = parts.next().unwrap_or("funscript"); // Some scripts may have multiple extensions (e.g., .roll.funscript)
+            let scripts = if ext != "funscript" { // If specific axis was provided, only remove that one
+                vec![entry_id.to_string()]
+            }
+            else {  // Else remove all axis variants in addition to the base script
+                let scripts = AXES.iter().map(|axis| format!("{}.{}.{}", stem, axis, ext));
+                std::iter::once(entry_id.to_string()).chain(scripts).collect()
+            };
+
+            let mut found = false;
+            metadata.script_variants.retain(|variant| {
+                if scripts.contains(&variant.name) {
+                    found = true;
+                    false
+                }
+                else {
+                    true
+                }
+            });
+
+            if !found {
+                return Err(FsvRemoveError::EntryNotFound(entry_id.to_string()));
+            }
+
+            let remove_files = scripts.iter().map(|s| s.as_str()).collect();
+            rebuild_archive(path, archive, &metadata, vec![], remove_files)?;
+        },
+        EntryType::Subtitle => {
+            let mut found = false;
+            metadata.subtitle_tracks.retain(|track| {
+                if track.name == entry_id {
+                    found = true;
+                    false
+                }
+                else {
+                    true
+                }
+            });
+
+            if !found {
+                return Err(FsvRemoveError::EntryNotFound(entry_id.to_string()));
+            }
+
+            let remove_files = vec![entry_id];
+            rebuild_archive(path, archive, &metadata, vec![], remove_files)?;
+        },
+    }
+
     Ok(())
 }
 

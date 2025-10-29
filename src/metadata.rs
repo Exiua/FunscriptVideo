@@ -127,6 +127,10 @@ impl CreatorInfo {
     }
 }
 
+pub trait WorkItem {
+    fn get_name(&self) -> &str;
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VideoFormat {
     pub name: String,
@@ -149,6 +153,12 @@ impl VideoFormat {
             start_offset_ms,
             checksum,
         }
+    }
+}
+
+impl WorkItem for VideoFormat {
+    fn get_name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -180,6 +190,12 @@ impl ScriptVariant {
     }
 }
 
+impl WorkItem for ScriptVariant {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubtitleTrack {
     pub name: String,
@@ -199,5 +215,11 @@ impl SubtitleTrack {
             description,
             checksum,
         }
+    }
+}
+
+impl WorkItem for SubtitleTrack {
+    fn get_name(&self) -> &str {
+        &self.name
     }
 }
