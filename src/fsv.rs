@@ -1,6 +1,6 @@
 use std::{collections::HashSet, io::{Read, Write}, path::{Path, PathBuf}};
 
-use clap::error;
+use clap::{ValueEnum, error};
 use thiserror::Error;
 use tracing::{error, info, warn};
 use zip::write::SimpleFileOptions;
@@ -415,7 +415,7 @@ pub enum FsvAddError {
     CreatorInfoNotFound(String),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum ItemType {
     Video,
     Script,
@@ -539,6 +539,26 @@ pub async fn add_to_fsv(args: AddArgs, db_client: &DbClient, interactive: bool) 
         },
     }
 
+    Ok(())
+}
+
+pub async fn add_creator_to_fsv(fsv_path: &Path, work_type: ItemType, creator_key: &str, work_name: &str, source_url: &str, db_client: &DbClient) -> Result<(), FsvAddError> {
+    let (archive, mut metadata) = open_fsv(fsv_path)?;
+    let creator_info = db_client.get_creator_info_by_key(creator_key).await?;
+    let creator_info = match creator_info {
+        Some(info) => info,
+        None => return Err(FsvAddError::CreatorInfoNotFound(creator_key.to_string())),
+    };
+
+    let work_info = WorkCreatorsMetadata::new(work_name.to_string(), source_url.to_string(), creator_info);
+    match work_type {
+        ItemType::Video => metadata.add_video_creator(work_info),
+        ItemType::Script => metadata.add_script_creator(work_info),
+        ItemType::Subtitle => metadata.add_subtitle_creator(work_info),
+    }
+
+    rebuild_archive(fsv_path, archive, &metadata, vec![], vec![])?;
+    
     Ok(())
 }
 

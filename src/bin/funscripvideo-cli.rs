@@ -1,11 +1,11 @@
-use std::{path::{Path, PathBuf}, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use tokio::runtime::Runtime;
 use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, add_to_fsv}};
+
+use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, add_creator_to_fsv, add_to_fsv}};
 
 #[derive(Parser, Debug)]
 #[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None)]
@@ -95,7 +95,7 @@ enum CreatorLocation {
         #[arg(help = "Path to the FSV file to modify")]
         fsv_path: PathBuf,
         #[arg(help = "Type of work to associate the creator with")]
-        work_type: WorkType,
+        work_type: ItemType,
         #[arg(short, long, required = true, help = "Creator key/identifier")]
         creator_key: String,
         #[arg(short, long, required = true, help = "Name of the created work")]
@@ -103,13 +103,6 @@ enum CreatorLocation {
         #[arg(short, long, default_value = "", help = "Source URL")]
         source_url: String,
     }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum WorkType {
-    Video,
-    Script,
-    Subtitle,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -293,7 +286,13 @@ async fn add(cmd: AddCommands, db_client: &DbClient, interactive: bool) {
                         Err(err) => error!("Error adding creator info to database: {}", err),
                     }
                 },
-                CreatorLocation::Fsv { fsv_path, work_type, creator_key, work_name, source_url } => todo!(),
+                CreatorLocation::Fsv { fsv_path, work_type, creator_key, work_name, source_url } => {
+                    let result = add_creator_to_fsv(&fsv_path, work_type, &creator_key, &work_name, &source_url, db_client).await;
+                    match result {
+                        Ok(_) => info!("Creator info added to FSV file successfully."),
+                        Err(err) => error!("Error adding creator info to FSV file: {}", err),
+                    }
+                },
             }
         },
         AddCommands::Video { fsv_path, video_path, creator_key } => add_item_to_fsv(fsv_path, ItemType::Video, video_path, creator_key, db_client, interactive).await,
