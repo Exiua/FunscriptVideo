@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, EntryType, add_creator_to_fsv, add_to_fsv}};
+use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, EntryType}};
 
 #[derive(Parser, Debug)]
 #[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None)]
@@ -39,6 +39,9 @@ enum Commands {
         entry_type: EntryType,
         #[arg(help = "Identifier of the entry to remove (key for creator_info, filename for video/script/subtitle)")]
         entry_id: String,
+        // TODO: Figure out how to cleanly add this option to the cli
+        // #[arg()]
+        // db: bool,
     },
     /// Extract contents from a FunscriptVideo file
     Extract {
@@ -276,7 +279,7 @@ async fn add(cmd: AddCommands, db_client: &DbClient, interactive: bool) {
                     }
                 },
                 CreatorLocation::Fsv { fsv_path, work_type, creator_key, work_name, source_url } => {
-                    let result = add_creator_to_fsv(&fsv_path, work_type, &creator_key, &work_name, &source_url, db_client).await;
+                    let result = FunScriptVideo::fsv::add_creator_to_fsv(&fsv_path, work_type, &creator_key, &work_name, &source_url, db_client).await;
                     match result {
                         Ok(_) => info!("Creator info added to FSV file successfully."),
                         Err(err) => error!("Error adding creator info to FSV file: {}", err),
@@ -292,7 +295,7 @@ async fn add(cmd: AddCommands, db_client: &DbClient, interactive: bool) {
 
 async fn add_item_to_fsv(fsv_path: PathBuf, item_type: ItemType, item_path: PathBuf, creator_key: Option<String>, db_client: &DbClient, interactive: bool) {
     let args = AddArgs::new(fsv_path, item_type, item_path, creator_key);
-    let result = add_to_fsv(args, db_client, interactive).await;
+    let result = FunScriptVideo::fsv::add_to_fsv(args, db_client, interactive).await;
     match result {
         Ok(_) => info!("{} added to FSV file successfully.", item_type.get_name()),
         Err(err) => error!("Error adding {} to FSV file: {}", item_type.get_name(), err),
@@ -300,7 +303,11 @@ async fn add_item_to_fsv(fsv_path: PathBuf, item_type: ItemType, item_path: Path
 }
 
 fn remove(path: &PathBuf, entry_type: EntryType, entry_id: String) {
-    todo!()
+    let result = FunScriptVideo::fsv::remove_from_fsv(&path, entry_type, &entry_id);
+    match result {
+        Ok(_) => info!("Entry removed from FSV file successfully."),
+        Err(err) => error!("Error removing entry from FSV file: {}", err),
+    }
 }
 
 fn extract(path: &PathBuf, output_dir: &PathBuf) {

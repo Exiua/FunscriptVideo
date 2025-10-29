@@ -89,6 +89,12 @@ impl CreatorsMetadata {
     pub fn add_subtitle_creator(&mut self, work_creator: WorkCreatorsMetadata) {
         self.subtitles.push(work_creator);
     }
+
+    pub fn retain<F: FnMut(&WorkCreatorsMetadata) -> bool>(&mut self, mut f: F) {
+        self.videos.retain(&mut f);
+        self.scripts.retain(&mut f);
+        self.subtitles.retain(&mut f);
+    }
 }
 
 impl Default for CreatorsMetadata {

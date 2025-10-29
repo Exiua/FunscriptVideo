@@ -593,7 +593,24 @@ pub enum FsvRemoveError {
 pub fn remove_from_fsv(path: &Path, entry_type: EntryType, entry_id: &str) -> Result<(), FsvRemoveError> {
     let (archive, mut metadata) = open_fsv(path)?;
     match entry_type {
-        EntryType::Creator => todo!(),
+        EntryType::Creator => {
+            let mut found = false;
+            metadata.creators.retain(|creator| {
+                if creator.work_name == entry_id {
+                    found = true;
+                    false
+                }
+                else {
+                    true
+                }
+            });
+
+            if !found {
+                return Err(FsvRemoveError::EntryNotFound(entry_id.to_string()));
+            }
+
+            rebuild_archive(path, archive, &metadata, vec![], vec![])?;
+        },
         EntryType::Video => {
             let mut found = false;
             metadata.video_formats.retain(|format| {
@@ -664,6 +681,11 @@ pub fn remove_from_fsv(path: &Path, entry_type: EntryType, entry_id: &str) -> Re
         },
     }
 
+    Ok(())
+}
+
+pub async fn remove_creator_from_db(creator_key: &str, db_client: &DbClient) -> Result<(), FsvRemoveError> {
+    db_client.delete_creator_info_by_key(creator_key).await?;
     Ok(())
 }
 
