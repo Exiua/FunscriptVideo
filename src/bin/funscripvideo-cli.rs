@@ -27,7 +27,22 @@ enum Commands {
         path: PathBuf,
     },
     /// Create a new FunscriptVideo file
-    Create {},
+    Create {
+        #[arg(help = "Path to the new FunscriptVideo file")]
+        path: PathBuf,
+        #[arg(help = "Title of the FunscriptVideo")]
+        title: String,
+        #[arg(num_args = 0.., help = "Tags associated with the FunscriptVideo")]
+        tags: Vec<String>,
+        #[arg(long, help = "Optional video file to include")]
+        video: Option<PathBuf>,
+        #[arg(long, help = "Optional video creator key")]
+        video_creator_key: Option<String>,
+        #[arg(long, help = "Optional script file to include")]
+        script: Option<PathBuf>,
+        #[arg(long, help = "Optional script creator key")]
+        script_creator_key: Option<String>,
+    },
     /// Add an entry to a FunscriptVideo file
     #[command(subcommand)]
     Add(AddCommands),
@@ -57,6 +72,11 @@ enum Commands {
     },
     /// Display information about a FunscriptVideo file
     Info {},
+    /// Rebuild a FunscriptVideo file
+    Rebuild {
+        #[arg(help = "Path to the FunscriptVideo file to rebuild")]
+        path: PathBuf,
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -215,11 +235,12 @@ fn main() -> ExitCode {
     let interactive = !args.non_interactive;
     match args.command {
         Commands::Validate { path } => validate(&path),
-        Commands::Create {} => create(),
+        Commands::Create { path, title, tags, video, script, video_creator_key, script_creator_key } => rt.block_on(create(path, title, tags, video, script, video_creator_key, script_creator_key, &db_client, interactive)),
         Commands::Add(add_cmd) => rt.block_on(add(add_cmd, &db_client, interactive)),
         Commands::Remove { path, entry_type, entry_id } => remove(&path, entry_type, entry_id),
         Commands::Extract { path, output_dir } => extract(&path, &output_dir),
         Commands::Info {} => info(),
+        Commands::Rebuild { path } => rebuild(path),
     }
 
     ExitCode::SUCCESS
@@ -262,8 +283,13 @@ fn validate(path: &PathBuf) {
     }
 }
 
-fn create() {
-    todo!()
+async fn create(path: PathBuf, title: String, tags: Vec<String>, video: Option<PathBuf>, script: Option<PathBuf>, video_creator_key: Option<String>, script_creator_key: Option<String>, db_client: &DbClient, interactive: bool) {
+    let args = FunScriptVideo::fsv::CreateArgs::new(path, title, tags, video, script, video_creator_key, script_creator_key);
+    let result = FunScriptVideo::fsv::create_fsv(args, db_client, interactive).await;
+    match result {
+        Ok(_) => info!("FSV file created successfully."),
+        Err(err) => error!("Error creating FSV file: {}", err),
+    }
 }
 
 async fn add(cmd: AddCommands, db_client: &DbClient, interactive: bool) {
@@ -320,4 +346,12 @@ fn extract(path: &PathBuf, output_dir: &PathBuf) {
 
 fn info() {
     todo!()
+}
+
+fn rebuild(path: PathBuf) {
+    let result = FunScriptVideo::fsv::rebuild_fsv(&path);
+    match result {
+        Ok(_) => info!("FSV file rebuilt successfully."),
+        Err(err) => error!("Error rebuilding FSV file: {}", err),
+    }
 }

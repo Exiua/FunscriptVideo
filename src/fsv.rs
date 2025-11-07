@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::{Read, Write}, path::{Path, PathBuf}};
+use std::{collections::HashSet, fs::File, io::{Read, Write}, path::{Path, PathBuf}};
 
 use clap::ValueEnum;
 use thiserror::Error;
@@ -375,9 +375,139 @@ pub enum FsvCreateError {
     Zip(#[from] zip::result::ZipError),
     #[error("Serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("From UTF-8 error: {0}")]
+    FromUtf8(#[from] std::string::FromUtf8Error),
+    #[error("Database client error: {0}")]
+    DbClient(#[from] db_client::DbClientError),
+    #[error("FSV error: {0}")]
+    Fsv(#[from] FsvError),
+    #[error("Get duration error: {0}")]
+    GetDurationError(#[from] file_util::GetDurationError),
+    #[error("FSV already exists at path: {0}")]
+    FsvAlreadyExists(PathBuf),
+    #[error("Creator info for {0} not found for key: {1}")]
+    CreatorInfoNotFound(ItemType, String),
 }
 
-// TODO: Implement FSV creation function
+#[derive(Debug)]
+pub struct CreateArgs {
+    pub path: PathBuf,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub video: Option<PathBuf>,
+    pub script: Option<PathBuf>,
+    pub video_creator_key: Option<String>,
+    pub script_creator_key: Option<String>,
+}
+
+impl CreateArgs {
+    pub fn new(path: PathBuf, title: String, tags: Vec<String>, video: Option<PathBuf>, script: Option<PathBuf>, video_creator_key: Option<String>, script_creator_key: Option<String>) -> Self {
+        CreateArgs {
+            path,
+            title,
+            tags,
+            video,
+            script,
+            video_creator_key,
+            script_creator_key,
+        }
+    }
+}
+
+pub async fn create_fsv(args: CreateArgs, db_client: &DbClient, interactive: bool) -> Result<(), FsvCreateError> {
+    let CreateArgs { path, title, tags, video, script, video_creator_key, script_creator_key } = args;
+    // Create file but don't overwrite if it exists
+    let result = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path);
+    let file = match result {
+        Ok(file) => file,
+        Err(err) => match err.kind() {
+            std::io::ErrorKind::AlreadyExists => return Err(FsvCreateError::FsvAlreadyExists(path)),
+            _ => return Err(FsvCreateError::Io(err)),
+        },
+    };
+
+    let result = create_inner(file, title, tags, video, script, video_creator_key, script_creator_key, db_client, interactive).await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            // Clean up by removing the created file
+            if let Err(remove_err) = std::fs::remove_file(&path) {
+                error!("Error removing incomplete FSV file at '{}': {}", path.display(), remove_err);
+            }
+
+            Err(err)
+        }
+    }
+}
+
+// Providing the creator without the accompanying file path will silently skip adding the creator info (e.g., providing a video creator without a video file)
+async fn create_inner(file: File, title: String, tags: Vec<String>, video: Option<PathBuf>, script: Option<PathBuf>, video_creator_key: Option<String>, script_creator_key: Option<String>, db_client: &DbClient, interactive: bool) -> Result<(), FsvCreateError> {
+    let mut metadata = FsvMetadata::new(LATEST_FSV_FORMAT_VERSION);
+    metadata.title = title;
+    metadata.tags = tags;
+
+    let mut add_files = Vec::new();
+    // _filename and _path variables are needed to keep the PathBuf alive while being used in AddFile, do not access them directly
+    let video_filename;
+    let video_path;
+    let mut video_added = false;
+    if let Some(video) = video {
+        video_path = video;
+        let video_creator_key = get_creator_info_from_key(&db_client, video_creator_key.as_deref(), interactive).await?;
+        video_filename = video_path.file_name().and_then(|f| f.to_str()).unwrap_or("video.mp4").to_string();
+        let video_duration = file_util::get_video_duration(&video_path)?;
+        let content = std::fs::read(&video_path)?;
+        let hash = get_file_hash(&content);
+        if let Some(creator_info) = video_creator_key {
+            let work_info = WorkCreatorsMetadata::new(video_filename.clone(), String::new(), creator_info);
+            metadata.add_video_creator(work_info);
+        }
+
+        let video_format = VideoFormat::new(video_filename.clone(), String::new(), video_duration, 0, hash);
+        metadata.add_video_format(video_format);
+        let add_file = AddFile::new(&video_filename, &video_path);
+        video_added = true;
+        add_files.push(add_file);
+    }
+
+    let script_filename;
+    let script_path;
+    let mut script_added = false;
+    if let Some(script) = script {
+        script_path = script;
+        let script_creator_key = get_creator_info_from_key(&db_client, script_creator_key.as_deref(), interactive).await?;
+        script_filename = script_path.file_name().and_then(|f| f.to_str()).unwrap_or("script.funscript").to_string();
+        let content = std::fs::read(&script_path)?;
+        let hash = get_file_hash(&content);
+        let file_content = String::from_utf8(content)?;
+        let funscript = serde_json::from_str::<Funscript>(&file_content)?;
+        let script_duration = file_util::get_funscript_duration(&funscript)?;
+        if let Some(creator_info) = script_creator_key {
+            let work_info = WorkCreatorsMetadata::new(script_filename.to_string(), String::new(), creator_info);
+            metadata.add_script_creator(work_info);
+        }
+
+        let script_variant = ScriptVariant::new(script_filename.to_string(), String::new(), vec![], script_duration, 0, hash);
+        metadata.add_script_variant(script_variant);
+        let add_file = AddFile::new(&script_filename, &script_path);
+        script_added = true;
+        add_files.push(add_file);
+    }
+
+    match (video_added, script_added) {
+        (true, true) => (),
+        (true, false) => warn!("No script provided for FSV creation, creating incomplete FSV"),
+        (false, true) => warn!("No video provided for FSV creation, creating incomplete FSV"),
+        (false, false) => warn!("No video or script provided for FSV creation, creating incomplete FSV"),
+    }
+
+    build_archive(file, &metadata, add_files)?;
+    
+    Ok(())
+}
 
 #[derive(Debug, Error)]
 pub enum FsvAddError {
@@ -424,6 +554,12 @@ impl ItemType {
     }
 }
 
+impl std::fmt::Display for ItemType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.get_name())
+    }
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum EntryType {
     Creator,
@@ -467,23 +603,7 @@ pub async fn add_to_fsv(args: AddArgs, db_client: &DbClient, interactive: bool) 
     let filname = item_path.file_name().and_then(|f| f.to_str()).ok_or_else(|| FsvAddError::UnableToGetFileName(item_path.to_path_buf()))?;
     let content = std::fs::read(&item_path)?;
     let hash = get_file_hash(&content);
-    let creator_info = if let Some(key) = creator_key {
-        let creator_info = db_client.get_creator_info_by_key(&key).await?;
-        if let Some(creator_info) = creator_info {
-            Some(creator_info)
-        }
-        else if interactive {
-            warn!("Creator with key '{}' not found in database; entering interactive mode.", key);
-            let creator_info = get_creator_info_from_user(db_client, Some(&key)).await?;
-            Some(creator_info)
-        }
-        else{
-            return Err(FsvAddError::CreatorInfoNotFound(key));
-        }
-    }
-    else {
-        None
-    };
+    let creator_info = get_creator_info_from_key(&db_client, creator_key.as_deref(), interactive).await?;
 
     let (archive, mut metadata) = open_fsv(&path)?;
     match item_type {
@@ -690,6 +810,28 @@ pub async fn remove_creator_from_db(creator_key: &str, db_client: &DbClient) -> 
 }
 
 #[derive(Debug, Error)]
+pub enum FsvRebuildError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("ZIP archive error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("Serde json error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+    #[error("Database client error: {0}")]
+    DbClient(#[from] db_client::DbClientError),
+    #[error("FSV error: {0}")]
+    Fsv(#[from] FsvError),
+}
+
+/// Rebuild the FSV archive without any changes. This ensures that the only files present are those listed in the central directory of the ZIP archive.
+pub fn rebuild_fsv(path: &Path) -> Result<(), FsvRebuildError> {
+    let (archive, metadata) = open_fsv(path)?;
+    rebuild_archive(path, archive, &metadata, vec![], vec![])?;
+
+    Ok(())
+}
+
+#[derive(Debug, Error)]
 pub enum FsvError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -701,6 +843,8 @@ pub enum FsvError {
     DbClient(#[from] db_client::DbClientError),
     #[error("Metadata file not found in FSV archive")]
     MetadataFileNotFound,
+    #[error("Creator info not found for key: {0}")]
+    CreatorInfoNotFound(String),
 }
 
 #[derive(Debug)]
@@ -713,6 +857,26 @@ impl<'a> AddFile<'a> {
     pub fn new(name: &'a str, path: &'a Path) -> Self {
         AddFile { name, path }
     }
+}
+
+fn build_archive(file: File, metadata: &FsvMetadata, add_files: Vec<AddFile>) -> Result<(), FsvError> {
+    let mut zip_writer = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Bzip2);
+    // Write metadata first
+    let metadata_json = serde_json::to_string_pretty(metadata)?;
+    zip_writer.start_file("metadata.json", options)?;
+    zip_writer.write_all(metadata_json.as_bytes())?;
+
+    // Add files
+    for file_path in add_files {
+        let mut file = std::fs::File::open(file_path.path)?;
+        zip_writer.start_file(file_path.name, options)?;
+        std::io::copy(&mut file, &mut zip_writer)?;
+    }
+    
+    zip_writer.finish()?.flush()?;
+
+    Ok(())
 }
 
 /// Rebuild the FSV archive with updated metadata and added/removed files (metadata is assumed to already have added/removed the relevant entries)
@@ -786,6 +950,26 @@ fn prompt_input(prompt: &str) -> std::io::Result<String> {
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf)?;
     Ok(buf.trim().to_string())
+}
+
+pub async fn get_creator_info_from_key(db_client: &DbClient, creator_key: Option<&str>, interactive: bool) -> Result<Option<CreatorInfo>, FsvError> {
+    if let Some(key) = creator_key {
+        let creator_info = db_client.get_creator_info_by_key(&key).await?;
+        if let Some(creator_info) = creator_info {
+            Ok(Some(creator_info))
+        }
+        else if interactive {
+            warn!("Creator with key '{}' not found in database; entering interactive mode.", key);
+            let creator_info = get_creator_info_from_user(db_client, Some(&key)).await?;
+            Ok(Some(creator_info))
+        }
+        else{
+            Err(FsvError::CreatorInfoNotFound(key.to_string()))
+        }
+    }
+    else {
+        Ok(None)
+    }
 }
 
 pub async fn get_creator_info_from_user(db_client: &DbClient, creator_key: Option<&str>) -> Result<CreatorInfo, FsvError> {
