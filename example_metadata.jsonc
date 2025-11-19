@@ -1,0 +1,198 @@
+{
+    // ----------------------------------------------------------------------
+    // Version of the FSV metadata schema.
+    // MUST follow strict semantic versioning: MAJOR.MINOR.PATCH
+    // ----------------------------------------------------------------------
+    "format_version": "1.0.0",
+
+    // ----------------------------------------------------------------------
+    // Optional list of extension identifiers.
+    // Extensions may add new fields but MUST NOT override required semantics.
+    // ----------------------------------------------------------------------
+    "extensions": ["com.community.1.2.3"],
+
+    // Tags used for categorization or user-facing search indexing.
+    "tags": ["example", "demo", "funscript", "video"],
+
+    // Main human-readable title of this content set.
+    // If omitted, readers MAY fall back to using the .fsv filestem.
+    "title": "Example FSV Content",
+
+    // ----------------------------------------------------------------------
+    // Attribution metadata for videos, scripts, and subtitles.
+    // This metadata is non-functional: malformed entries MUST be ignored.
+    //
+    // NOTE: work_name is conceptual and does NOT need to match filenames.
+    //
+    // TODO (non-normative idea):
+    //   You MAY structure creators as a dictionary keyed by filename
+    //   for easier lookup in some tools, but doing so is NOT part of
+    //   the core specification and MUST NOT be required.
+    // ----------------------------------------------------------------------
+    "creators": {
+        "videos": [
+            {
+                // Logical description of the work the creator contributed to.
+                "work_name": "Normal 2D Release",
+
+                // MUST be a syntactically valid absolute URL.
+                "source_url": "https://example.com/normal_video",
+
+                "creator_info": {
+                    "name": "John Doe",
+                    "socials": [
+                        "https://twitter.com/johndoe",
+                        "https://patreon.com/johndoe"
+                    ]
+                }
+            },
+            {
+                "work_name": "3D Stereoscopic Version",
+                "source_url": "https://example.com/3d_video",
+                "creator_info": {
+                    "name": "Jane Smith",
+                    "socials": [
+                        "https://twitter.com/janesmith",
+                        "https://patreon.com/janesmith"
+                    ]
+                }
+            }
+        ],
+
+        // ------------------------------------------------------------------
+        // Script creator information.
+        //
+        // TODO (non-normative idea):
+        //   Tools MAY ignore creator_info when performing axis-level parsing,
+        //   because a single script may embed multiple axes whose attribution
+        //   differs. Handling that is tool-specific and not defined by the FSV spec.
+        // ------------------------------------------------------------------
+        "scripts": [
+            {
+                "work_name": "Normal Axis Script",
+                "source_url": "https://example.com/normal_script",
+                "creator_info": {
+                    "name": "Alice",
+                    "socials": ["https://patreon.com/alice"]
+                }
+            },
+            {
+                // Attribution for a roll-axis component; this does NOT imply
+                // anything about file structure or FunScript internals.
+                "work_name": "Normal Roll Axis",
+                "source_url": "https://example.com/normal_script",
+                "creator_info": {
+                    "name": "Alice",
+                    "socials": ["https://patreon.com/alice"]
+                }
+            },
+            {
+                "work_name": "Advanced Script Variant",
+                "source_url": "https://example.com/advanced_script",
+                "creator_info": {
+                    "name": "Bob",
+                    "socials": ["https://twitter.com/bob"]
+                }
+            }
+        ],
+
+        // Subtitle creator metadata (optional).
+        "subtitles": [
+            {
+                "work_name": "English Subtitle Track",
+                "source_url": "https://example.com/english_subtitles",
+                "creator_info": {
+                    "name": "Charlie",
+                    "socials": ["https://twitter.com/charlie"]
+                }
+            },
+            {
+                "work_name": "Spanish Subtitle Track",
+                "source_url": "https://example.com/spanish_subtitles",
+                "creator_info": {
+                    "name": "Diana",
+                    "socials": ["https://twitter.com/diana"]
+                }
+            }
+        ]
+    },
+
+    // ----------------------------------------------------------------------
+    // Video metadata entries.
+    //
+    // Filenames MUST exactly match files in the `.fsv` archive (when present).
+    //
+    // NOTE (non-normative):
+    //   Although many content sets intend all videos to show the same scene,
+    //   mismatched durations do NOT invalidate a container and are left to
+    //   players to reconcile or warn about.
+    // ----------------------------------------------------------------------
+    "video_formats": [
+        {
+            "name": "Normal.mp4",
+            "description": "Standard 2D video",
+            "duration": 123456, // milliseconds
+            "checksum": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        },
+        {
+            "name": "3D.mp4",
+            "description": "Stereoscopic 3D video",
+            "duration": 123656,
+            // NOTE: start_offset is NOT valid for videos; it applies only to scripts.
+            "checksum": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        }
+    ],
+
+    // ----------------------------------------------------------------------
+    // Script variant descriptions.
+    //
+    // Filenames MUST exactly match files in the archive.
+    //
+    // NOTE:
+    //   Script filenames must include `.funscript` or any valid extension
+    //   used by the archive; the specification does NOT assume an extension.
+    //
+    //   start_offset adjusts script → video alignment:
+    //     positive  = skip the first Nms of the script
+    //     negative  = delay script start by |N|ms
+    // ----------------------------------------------------------------------
+    "script_variants": [
+        {
+            "name": "Normal.funscript",
+            "description": "Standard script with optional roll axis",
+            "additional_axes": ["roll"],
+            "duration": 123456,
+            "start_offset": 0,
+            "checksum": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        },
+        {
+            "name": "Advanced.funscript",
+            "description": "Advanced script with additional pitch and yaw axes",
+            "additional_axes": ["pitch", "yaw"],
+            "duration": 123456,
+            "start_offset": 0,
+            "checksum": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        }
+    ],
+
+    // ----------------------------------------------------------------------
+    // Subtitle or caption tracks.
+    //
+    // Filenames MUST match archive contents exactly.
+    // Unsupported formats MAY be ignored by readers.
+    // ----------------------------------------------------------------------
+    "subtitle_tracks": [
+        {
+            "name": "English.srt",
+            "language": "en",
+            "description": "English subtitles",
+            "checksum": "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+        },
+        {
+            "name": "Spanish.smi",
+            "language": "es",
+            "description": "Spanish subtitles",
+            "checksum": "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+        }
+    ]
+}

@@ -1,121 +1,127 @@
 {
-    // Format version of this FSV file (for future compatibility)
     "format_version": "1.0.0",
-    // Tags to help categorize and search for this content
-    "tags": ["example", "demo", "funscript", "video"],
-    // Title of the content (should be same as fsv file name for consistency)
+    "extensions": [
+        "com.community.1.2.3"
+    ],
+    "tags": [
+        "example",
+        "demo",
+        "funscript",
+        "video"
+    ],
     "title": "Example FSV Content",
-    // Information about the creators of the videos and scripts
     "creators": {
-        // Shared creator information for the entire content
-        /// TODO: maybe use a dictionary with video_name as key to allow for easier parsing
         "videos": [
             {
-                // Name of the video file the creator is associated with
-                // Does not need to be an mp4, just the name used in video_formats below
-                "work_name": "Normal.mp4",
-                // URL where the video can be found
+                "work_name": "Normal 2D Release",
                 "source_url": "https://example.com/normal_video",
-                // Information about the creator
                 "creator_info": {
-                    // Name/alias of the creator
                     "name": "John Doe",
-                    // List of social media or support links
-                    "socials": ["twitter.com/johndoe", "patreon.com/johndoe"]
+                    "socials": [
+                        "https://twitter.com/johndoe",
+                        "https://patreon.com/johndoe"
+                    ]
                 }
             },
             {
-                "work_name": "3D.mp4",
+                "work_name": "3D Stereoscopic Version",
                 "source_url": "https://example.com/3d_video",
                 "creator_info": {
                     "name": "Jane Smith",
-                    "socials": ["twitter.com/janesmith", "patreon.com/janesmith"]
+                    "socials": [
+                        "https://twitter.com/janesmith",
+                        "https://patreon.com/janesmith"
+                    ]
                 }
             }
         ],
-        // Shared script creator information for the entire content
-        /// TODO: may want to disallow using creator_info for parsing content to allow for more complex attributions
-        /// e.g. a single script containing all axis information, but attribution is different for base script vs axis scripts
         "scripts": [
             {
-                "work_name": "Normal.funscript",
+                "work_name": "Normal Axis Script",
                 "source_url": "https://example.com/normal_script",
                 "creator_info": {
                     "name": "Alice",
-                    "socials": ["patreon.com/alice"]
+                    "socials": [
+                        "https://patreon.com/alice"
+                    ]
                 }
             },
             {
-                // Ideally, extra axis information would be included in the base script itself
-                "work_name": "Normal.roll.funscript",
+                "work_name": "Normal Roll Axis",
                 "source_url": "https://example.com/normal_script",
                 "creator_info": {
                     "name": "Alice",
-                    "socials": ["patreon.com/alice"]
+                    "socials": [
+                        "https://patreon.com/alice"
+                    ]
                 }
             },
             {
-                "work_name": "Advanced.funscript",
+                "work_name": "Advanced Script Variant",
                 "source_url": "https://example.com/advanced_script",
                 "creator_info": {
                     "name": "Bob",
-                    "socials": ["twitter.com/bob"]
+                    "socials": [
+                        "https://twitter.com/bob"
+                    ]
                 }
             }
         ],
-        // Shared subtitle creator information for the entire content
-        // Subtitles are optional but can be included for accessibility or localization
         "subtitles": [
             {
-                "work_name": "English.srt",
+                "work_name": "English Subtitle Track",
                 "source_url": "https://example.com/english_subtitles",
                 "creator_info": {
                     "name": "Charlie",
-                    "socials": ["twitter.com/charlie"]
+                    "socials": [
+                        "https://twitter.com/charlie"
+                    ]
                 }
             },
             {
-                "work_name": "Spanish.smi",
+                "work_name": "Spanish Subtitle Track",
                 "source_url": "https://example.com/spanish_subtitles",
                 "creator_info": {
                     "name": "Diana",
-                    "socials": ["twitter.com/diana"]
+                    "socials": [
+                        "https://twitter.com/diana"
+                    ]
                 }
             }
         ]
     },
-    // All videos should be the same length and display the same content such that the user can pick which format they want to use with which script
-    // There should not be a case where one video is a completely different scene than another video in the same set and same is true for scripts
     "video_formats": [
         {
-            "name": "Normal.mp4", // scripts are associated by name
+            "name": "Normal.mp4",
             "description": "Standard 2D video",
-            "duration": 123456, // duration in milliseconds
-            "start_offset": 0, // optional start offset in milliseconds (if the video needs to sync with a longer script)
-            "checksum": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" // optional checksum for integrity verification
+            "duration": 123456,
+            "checksum": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
         },
         {
             "name": "3D.mp4",
             "description": "Stereoscopic 3D video",
             "duration": 123656,
-            "start_offset": 600,
             "checksum": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
         }
     ],
-    // extension assumed to be .funscript and other axis can be checked for if not present in the base funscript
     "script_variants": [
         {
-            "name": "Normal",
+            "name": "Normal.funscript",
             "description": "Standard script with optional roll axis",
-            "additional_axes": ["roll"],
-            "duration": 123456, // duration in milliseconds
-            "start_offset": 0,  // optional start offset in milliseconds (if the script needs to sync with a longer video)
+            "additional_axes": [
+                "roll"
+            ],
+            "duration": 123456,
+            "start_offset": 0,
             "checksum": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
         },
         {
-            "name": "Advanced",
-            "description": "Advanced script with additional features",
-            "additional_axes": ["pitch", "yaw"],
+            "name": "Advanced.funscript",
+            "description": "Advanced script with pitch and yaw axes",
+            "additional_axes": [
+                "pitch",
+                "yaw"
+            ],
             "duration": 123456,
             "start_offset": 0,
             "checksum": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
