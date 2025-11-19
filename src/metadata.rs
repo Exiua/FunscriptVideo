@@ -1,12 +1,18 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::semver::Version;
 
+/// The root FSV metadata object.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FsvMetadata {
     pub format_version: Version,
     #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
+    // Optional in spec, but MUST NOT be null -> use empty string as "missing"
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -15,18 +21,23 @@ pub struct FsvMetadata {
     pub script_variants: Vec<ScriptVariant>,
     #[serde(default)]
     pub subtitle_tracks: Vec<SubtitleTrack>,
+    // Preserve unknown fields
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl FsvMetadata {
     pub fn new(format_version: Version) -> Self {
-        FsvMetadata {
+        Self {
             format_version,
+            extensions: Vec::new(),
             tags: Vec::new(),
             title: String::new(),
             creators: CreatorsMetadata::new(),
             video_formats: Vec::new(),
             script_variants: Vec::new(),
             subtitle_tracks: Vec::new(),
+            extra: HashMap::new(),
         }
     }
 
@@ -63,14 +74,17 @@ pub struct CreatorsMetadata {
     pub scripts: Vec<WorkCreatorsMetadata>,
     #[serde(default)]
     pub subtitles: Vec<WorkCreatorsMetadata>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl CreatorsMetadata {
     pub fn new() -> Self {
-        CreatorsMetadata {
+        Self {
             videos: Vec::new(),
             scripts: Vec::new(),
             subtitles: Vec::new(),
+            extra: HashMap::new(),
         }
     }
 
@@ -108,6 +122,8 @@ pub struct WorkCreatorsMetadata {
     pub work_name: String,
     pub source_url: String,
     pub creator_info: CreatorInfo,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl WorkCreatorsMetadata {
@@ -116,6 +132,7 @@ impl WorkCreatorsMetadata {
             work_name,
             source_url,
             creator_info,
+            extra: HashMap::new(),
         }
     }
 }
@@ -125,11 +142,13 @@ pub struct CreatorInfo {
     pub name: String,
     #[serde(default)]
     pub socials: Vec<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl CreatorInfo {
     pub fn new(name: String, socials: Vec<String>) -> Self {
-        CreatorInfo { name, socials }
+        CreatorInfo { name, socials, extra: HashMap::new() }
     }
 }
 
@@ -143,21 +162,21 @@ pub struct VideoFormat {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub duration_ms: u64,
-    #[serde(default)]
-    pub start_offset_ms: u64,
+    pub duration: u64,
     #[serde(default)]
     pub checksum: String,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl VideoFormat {
-    pub fn new(name: String, description: String, duration_ms: u64, start_offset_ms: u64, checksum: String) -> Self {
+    pub fn new(name: String, description: String, duration_ms: u64, checksum: String) -> Self {
         VideoFormat {
             name,
             description,
-            duration_ms,
-            start_offset_ms,
+            duration: duration_ms,
             checksum,
+            extra: HashMap::new(),
         }
     }
 }
@@ -176,22 +195,25 @@ pub struct ScriptVariant {
     #[serde(default)]
     pub additional_axes: Vec<String>,
     #[serde(default)]
-    pub duration_ms: u64,
+    pub duration: u64,
     #[serde(default)]
-    pub start_offset_ms: u64,
+    pub start_offset: i64,
     #[serde(default)]
     pub checksum: String,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl ScriptVariant {
-    pub fn new(name: String, description: String, additional_axes: Vec<String>, duration_ms: u64, start_offset_ms: u64, checksum: String) -> Self {
+    pub fn new(name: String, description: String, additional_axes: Vec<String>, duration: u64, start_offset: i64, checksum: String) -> Self {
         ScriptVariant {
             name,
             description,
             additional_axes,
-            duration_ms,
-            start_offset_ms,
+            duration,
+            start_offset,
             checksum,
+            extra: HashMap::new(),
         }
     }
 }
@@ -205,12 +227,13 @@ impl WorkItem for ScriptVariant {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubtitleTrack {
     pub name: String,
-    #[serde(default)]
     pub language: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
     pub checksum: String,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 impl SubtitleTrack {
@@ -220,6 +243,7 @@ impl SubtitleTrack {
             language,
             description,
             checksum,
+            extra: HashMap::new(),
         }
     }
 }
