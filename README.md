@@ -13,7 +13,7 @@ Its purpose is to simplify distribution, maintain proper attribution, and ensure
 
 The repository includes:
 
-- The **FSV specification** — detailing the required structure, fields, and validation rules.
+- The **FSV specification** — detailing the required structure, fields, and validation rules. ([here](SPEC.md))
 - A **CLI tool** for creating, validating, and extracting `.fsv` files for personal or development use.
 
 ## Key Features
