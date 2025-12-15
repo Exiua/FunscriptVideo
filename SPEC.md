@@ -175,7 +175,7 @@ It **MUST** be encoded as UTF-8 without BOM. Field order within the JSON object 
 |-------------------|------------------|--------------------------------------------------|----------|-----------------------------|-----------------------------------------------|
 | `format_version`  | string           | Version of the FSV metadata schema.              | Yes      | *None (must be provided)*   | Missing or not a string → **Invalid container** |
 | `tags`            | array of strings | Keywords or categories for discovery.            | No       | Empty array `[]`            | None                                            |
-| `title` | string | Canonical, human-readable name of the content set. If omitted, readers **MAY** derive a display title from the filestem of the `.fsv` file when available. | No | None (reader **MAY** use filestem as fallback) | None |
+| `title` | string | Canonical, human-readable name of the content set. If omitted, readers **MAY** derive a display title from the filestem of the `.fsv` file when available. | No | Empty string `""` (reader **MAY** use filestem as fallback) | None |
 | `creators`        | object           | Information about creators of videos, scripts, and subtitles. | No | `{ "videos": [], "scripts": [], "subtitles": [] }` | None |
 | `video_formats`   | array            | Metadata entries describing referenced video files. | Yes | *None (must be provided)* | Missing or empty array → **Invalid container** |
 | `script_variants` | array            | Metadata entries describing referenced Funscript files. | Yes | *None (must be provided)* | Missing or empty array → **Invalid container** |
