@@ -1,6 +1,6 @@
-# FunScriptVideo (FSV) Format Specification
+# FunscriptVideo (FSV) Format Specification
 
-The **FunScriptVideo (FSV)** format defines a ZIP-based archive (`.fsv`) for bundling one or more videos, FunScript files, optional subtitle tracks, and associated metadata into a single portable container.
+The **FunscriptVideo (FSV)** format defines a ZIP-based archive (`.fsv`) for bundling one or more videos, Funscript files, optional subtitle tracks, and associated metadata into a single portable container.
 
 Its goal is to make distributing multi-file content simple, self-contained, and attribution-friendly.
 
@@ -10,7 +10,7 @@ Its goal is to make distributing multi-file content simple, self-contained, and 
 
 An `.fsv` file is a **ZIP-based container** that stores:
 
-- One or more **FunScript files**
+- One or more **Funscript files**
 - Zero or more **video files** present in the archive, but **the metadata MUST declare at least one video entry**
 - Zero or more **subtitle files**
 - A single **metadata file** (`metadata.json`) describing the contents, creators, and relationships between the files
@@ -33,7 +33,7 @@ The key words **"MUST"**, **"MUST NOT"**, **"REQUIRED"**, **"SHALL"**, **"SHALL 
 : A playable video file *and its corresponding metadata entry* declared within the FSV metadata.
 
 **Script Variant**  
-: A FunScript file or logical component that defines motion or interaction data synchronized to the timeline of a referenced video. Variants may differ in axis, intensity, or style.
+: A Funscript file or logical component that defines motion or interaction data synchronized to the timeline of a referenced video. Variants may differ in axis, intensity, or style.
 
 **Subtitle Track**  
 : A subtitle or caption file referenced by the FSV metadata, such as `.srt`, `.vtt`, or `.smi`.
@@ -81,7 +81,7 @@ Their physical presence in the archive depends on whether the container is compl
 |------|-------------|-------------|
 | `metadata.json` | Describes all other contents and their relationships | **MUST** be present in the archive |
 | Video files | Video entries declared in `video_formats` | **MUST** have at least one metadata entry; file **MAY** be missing in incomplete containers |
-| Script files | FunScript entries declared in `script_variants` | **MUST** have at least one metadata entry; file **SHOULD** be present |
+| Script files | Funscript entries declared in `script_variants` | **MUST** have at least one metadata entry; file **SHOULD** be present |
 
 ### 3.2 Optional Files
 
@@ -178,7 +178,7 @@ It **MUST** be encoded as UTF-8 without BOM. Field order within the JSON object 
 | `title` | string | Canonical, human-readable name of the content set. If omitted, readers **MAY** derive a display title from the filestem of the `.fsv` file when available. | No | None (reader **MAY** use filestem as fallback) | None |
 | `creators`        | object           | Information about creators of videos, scripts, and subtitles. | No | `{ "videos": [], "scripts": [], "subtitles": [] }` | None |
 | `video_formats`   | array            | Metadata entries describing referenced video files. | Yes | *None (must be provided)* | Missing or empty array → **Invalid container** |
-| `script_variants` | array            | Metadata entries describing referenced FunScript files. | Yes | *None (must be provided)* | Missing or empty array → **Invalid container** |
+| `script_variants` | array            | Metadata entries describing referenced Funscript files. | Yes | *None (must be provided)* | Missing or empty array → **Invalid container** |
 | `subtitle_tracks` | array            | Metadata entries describing subtitle files.      | No       | Empty array `[]`            | None |
 
 If `title` is not provided, readers **MAY** fall back to using the filestem of the `.fsv` file as a display title. This fallback is not authoritative and is only intended for cases where no explicit title is present.
@@ -247,7 +247,7 @@ Malformed video format entries **MUST** cause the container to be treated as **i
 
 ### 4.4 Script Variants
 
-Each entry in the `script_variants` array describes a FunScript file referenced by the container.  
+Each entry in the `script_variants` array describes a Funscript file referenced by the container.  
 If the corresponding script file is present in the archive, its filename **MUST** exactly match the value of the `name` field.
 
 | Field             | Type     | Description                                                                                                                 | Required |
