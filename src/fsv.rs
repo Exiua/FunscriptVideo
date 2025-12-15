@@ -9,7 +9,7 @@ use crate::{db_client::{self, DbClient}, file_util, funscript::Funscript, metada
 
 const LATEST_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
 const MINIMUM_FSV_FORMAT_VERSION: Version = Version::new(1, 0, 0);
-const AXES: [&str; 7] = ["pitch", "roll", "suckManual", "surge", "sway", "twist", "valve"]; // TODO: Check if there are more axes in use
+const AXES: [&str; 11] = ["pitch", "roll", "suckManual", "surge", "sway", "twist", "valve", "vib", "lube", "suck", "max"]; // TODO: Check if there are more axes in use
 
 #[derive(Debug, Error)]
 pub enum FsvExtractError {
@@ -466,7 +466,7 @@ async fn create_inner(file: File, title: String, tags: Vec<String>, video: Optio
             metadata.add_video_creator(work_info);
         }
 
-        let video_format = VideoFormat::new(video_filename.clone(), String::new(), video_duration, 0, hash);
+        let video_format = VideoFormat::new(video_filename.clone(), String::new(), video_duration, hash);
         metadata.add_video_format(video_format);
         let add_file = AddFile::new(&video_filename, &video_path);
         video_added = true;
@@ -623,7 +623,7 @@ pub async fn add_to_fsv(args: AddArgs, db_client: &DbClient, interactive: bool) 
                 metadata.add_video_creator(work_info);
             }
 
-            let video_format = VideoFormat::new(filname.to_string(), String::new(), video_duration, 0, hash);
+            let video_format = VideoFormat::new(filname.to_string(), String::new(), video_duration, hash);
             metadata.add_video_format(video_format);
             let add_file = AddFile::new(filname, &item_path);
             rebuild_archive(&path, archive, &metadata, vec![add_file], vec![])?;
@@ -829,6 +829,54 @@ pub fn rebuild_fsv(path: &Path) -> Result<(), FsvRebuildError> {
     rebuild_archive(path, archive, &metadata, vec![], vec![])?;
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct FsvInfo {
+    // Define fields to hold information about the FSV file
+    pub title: String,
+    pub videos: Vec<(String, bool)>, // (filename, is_present)
+    pub scripts: Vec<(String, bool)>, // (filename, is_present)
+    pub subtitles: Vec<(String, bool)>, // (filename, is_present)
+}
+
+impl FsvInfo {
+    fn new(title: String, videos: Vec<(String, bool)>, scripts: Vec<(String, bool)>, subtitles: Vec<(String, bool)>) -> Self {
+        FsvInfo { title, videos, scripts, subtitles }
+    }
+}
+
+pub fn get_fsv_info(path: &Path) -> Result<FsvInfo, FsvError> {
+    let (mut archive, metadata) = open_fsv(path)?;
+    let title = if metadata.title.trim().is_empty() {
+        path.file_stem()
+            .and_then(|os_str| os_str.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    }
+    else{
+        metadata.title.to_string()
+    };
+
+    let mut videos = Vec::new();
+    for video in &metadata.video_formats {
+        let is_present = archive.by_name(&video.name).is_ok();
+        videos.push((video.name.to_string(), is_present));
+    }
+
+    let mut scripts = Vec::new();
+    for variant in &metadata.script_variants {
+        let is_present = archive.by_name(&variant.name).is_ok();
+        scripts.push((variant.name.to_string(), is_present));
+    }
+
+    let mut subtitles = Vec::new();
+    for track in &metadata.subtitle_tracks {
+        let is_present = archive.by_name(&track.name).is_ok();
+        subtitles.push((track.name.to_string(), is_present));
+    }
+    
+    Ok(FsvInfo::new(title, videos, scripts, subtitles))
 }
 
 #[derive(Debug, Error)]

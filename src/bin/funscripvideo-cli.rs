@@ -1,17 +1,45 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode, result};
 
-use clap::{Parser, Subcommand, ValueEnum};
-use tracing::{error, info, warn};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use tracing::{error, info, level_filters::LevelFilter, warn};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use FunScriptVideo::{db_client::DbClient, fsv::{AddArgs, ItemType, EntryType}};
+use FunScriptVideo::{db_client::DbClient, fsv::{self, AddArgs, EntryType, ItemType}};
 
 #[derive(Parser, Debug)]
-#[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None)]
+#[command(version = "v1.0.0", about = "FunscriptVideo CLI Utility", long_about = None, group(
+    clap::ArgGroup::new("logging")
+        .args(&["verbosity", "quiet", "silent"])
+        .multiple(false)
+        .required(false)
+))]
 struct Args {
     #[arg(short, long, global = true, default_value = "stdout", help = "Logging mode: none, stdout, file, both")]
     log_mode: LogMode,
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        global = true,
+        action = ArgAction::Count,
+        help = "Increase verbosity: -v = debug, -vv = trace"
+    )]
+    verbosity: u8,
+    #[arg(
+        short = 'q',
+        long = "quiet",
+        global = true,
+        action = ArgAction::Count,
+        help = "Decrease verbosity: -q = warn, -qq = error"
+    )]
+    quiet: u8,
+    #[arg(
+        long,
+        default_value_t = false,
+        global = true,
+        help = "Disable all logging output"
+    )]
+    silent: bool,
     /// Run in non-interactive mode (disable all user prompts)
     #[arg(long, global = true, help = "Disable interactive prompts (for scripting or CI)")]
     non_interactive: bool,
@@ -71,7 +99,10 @@ enum Commands {
         output_dir: PathBuf,
     },
     /// Display information about a FunscriptVideo file
-    Info {},
+    Info {
+        #[arg(help = "Path to the FunscriptVideo file to display info for")]
+        path: PathBuf,
+    },
     /// Rebuild a FunscriptVideo file
     Rebuild {
         #[arg(help = "Path to the FunscriptVideo file to rebuild")]
@@ -145,19 +176,54 @@ enum LogMode {
     Both,
 }
 
-fn configure_logging(app_name: &str, mode: LogMode) -> WorkerGuard {
+#[derive(Debug, Clone, Copy)]
+enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl From<LogLevel> for LevelFilter {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Off => LevelFilter::OFF,
+            LogLevel::Error => LevelFilter::ERROR,
+            LogLevel::Warn => LevelFilter::WARN,
+            LogLevel::Info => LevelFilter::INFO,
+            LogLevel::Debug => LevelFilter::DEBUG,
+            LogLevel::Trace => LevelFilter::TRACE,
+        }
+    }
+}
+
+fn verbosity_to_level(count: u8) -> LogLevel {
+    match count {
+        0 => LogLevel::Info,
+        1 => LogLevel::Debug,
+        _ => LogLevel::Trace,
+    }
+}
+
+fn quiet_to_level(count: u8) -> LogLevel {
+    match count {
+        0 => LogLevel::Info,
+        1 => LogLevel::Warn,
+        _ => LogLevel::Error,
+    }
+}
+
+
+fn configure_logging(app_name: &str, mode: LogMode, level: LogLevel) -> WorkerGuard {
     let file_appender = rolling::daily("logs", format!("{}.log", app_name));
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let env_filter: EnvFilter;
-    #[cfg(debug_assertions)]
-    {
-        env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    }
+    let level_filter: LevelFilter = level.into();
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(level_filter.into())
+        .from_env_lossy();
 
     match mode {
         LogMode::None => {}
@@ -205,7 +271,20 @@ fn configure_logging(app_name: &str, mode: LogMode) -> WorkerGuard {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    let _guard = configure_logging("funscripvideo-cli", args.log_mode);
+    let level = if args.silent {
+        LogLevel::Off
+    }
+    else if args.verbosity > 0 {
+        verbosity_to_level(args.verbosity)
+    }
+    else if args.quiet > 0 {
+        quiet_to_level(args.quiet)
+    }
+    else {
+        LogLevel::Info
+    };
+
+    let _guard = configure_logging("funscripvideo-cli", args.log_mode, level);
     let result = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build();
@@ -239,7 +318,7 @@ fn main() -> ExitCode {
         Commands::Add(add_cmd) => rt.block_on(add(add_cmd, &db_client, interactive)),
         Commands::Remove { path, entry_type, entry_id } => remove(&path, entry_type, entry_id),
         Commands::Extract { path, output_dir } => extract(&path, &output_dir),
-        Commands::Info {} => info(),
+        Commands::Info { path } => info(&path),
         Commands::Rebuild { path } => rebuild(path),
     }
 
@@ -344,8 +423,38 @@ fn extract(path: &PathBuf, output_dir: &PathBuf) {
     }
 }
 
-fn info() {
-    todo!()
+fn info(path: &PathBuf) {
+    let result = FunScriptVideo::fsv::get_fsv_info(&path);
+    let fsv_info = match result {
+        Ok(info) => info,
+        Err(err) => {
+            error!("Error getting FSV file info: {}", err);
+            return;
+        }
+    };
+
+    println!("FSV File Info:");
+    println!("Title: {}", fsv_info.title);
+    if !fsv_info.videos.is_empty() {
+        println!("Videos ({}):", fsv_info.videos.len());
+        for (video_name, is_present) in &fsv_info.videos {
+            println!("  {}: {}", video_name, if *is_present { "Present" } else { "Missing" });
+        }
+    }
+
+    if !fsv_info.scripts.is_empty() {
+        println!("Scripts ({}):", fsv_info.scripts.len());
+        for (script_name, is_present) in &fsv_info.scripts {
+            println!("  {}: {}", script_name, if *is_present { "Present" } else { "Missing" });
+        }
+    }
+
+    if !fsv_info.subtitles.is_empty() {
+        println!("Subtitles ({}):", fsv_info.subtitles.len());
+        for (subtitle_name, is_present) in &fsv_info.subtitles {
+            println!("  {}: {}", subtitle_name, if *is_present { "Present" } else { "Missing" });
+        }
+    }
 }
 
 fn rebuild(path: PathBuf) {
