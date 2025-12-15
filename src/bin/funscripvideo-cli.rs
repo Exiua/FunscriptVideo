@@ -435,25 +435,66 @@ fn info(path: &PathBuf) {
 
     println!("FSV File Info:");
     println!("Title: {}", fsv_info.title);
+    let mut missing_video_file = false;
     if !fsv_info.videos.is_empty() {
         println!("Videos ({}):", fsv_info.videos.len());
         for (video_name, is_present) in &fsv_info.videos {
             println!("  {}: {}", video_name, if *is_present { "Present" } else { "Missing" });
+            if !*is_present {
+                missing_video_file = true;
+            }
         }
     }
 
+    let mut missing_script_file = false;
     if !fsv_info.scripts.is_empty() {
         println!("Scripts ({}):", fsv_info.scripts.len());
         for (script_name, is_present) in &fsv_info.scripts {
             println!("  {}: {}", script_name, if *is_present { "Present" } else { "Missing" });
+            if !*is_present {
+                missing_script_file = true;
+            }
         }
     }
 
+    let mut missing_subtitle_file = false;
     if !fsv_info.subtitles.is_empty() {
         println!("Subtitles ({}):", fsv_info.subtitles.len());
         for (subtitle_name, is_present) in &fsv_info.subtitles {
             println!("  {}: {}", subtitle_name, if *is_present { "Present" } else { "Missing" });
+            if !*is_present {
+                missing_subtitle_file = true;
+            }
         }
+    }
+
+    if !fsv_info.extra_files.is_empty() {
+        println!("WARNING: Extra files found in FSV archive ({}):", fsv_info.extra_files.len());
+        for extra_file in &fsv_info.extra_files {
+            println!("  {}", extra_file);
+        }
+    }
+
+    if missing_video_file {
+        println!("WARNING: Some video files are missing from the FSV archive.");
+    }
+
+    if missing_script_file {
+        println!("WARNING: Some script files are missing from the FSV archive.");
+    }
+
+    if missing_subtitle_file {
+        println!("WARNING: Some subtitle files are missing from the FSV archive.");
+    }
+
+    if fsv_info.videos.is_empty() || fsv_info.scripts.is_empty() {
+        println!("Container State: Invalid (missing video or script)");
+    }
+    else if missing_video_file || missing_script_file {
+        println!("Container State: Content Incomplete");
+    }
+    else {
+        println!("Container State: Content Complete");
     }
 }
 

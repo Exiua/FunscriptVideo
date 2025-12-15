@@ -838,14 +838,16 @@ pub struct FsvInfo {
     pub videos: Vec<(String, bool)>, // (filename, is_present)
     pub scripts: Vec<(String, bool)>, // (filename, is_present)
     pub subtitles: Vec<(String, bool)>, // (filename, is_present)
+    pub extra_files: Vec<String>,
 }
 
 impl FsvInfo {
-    fn new(title: String, videos: Vec<(String, bool)>, scripts: Vec<(String, bool)>, subtitles: Vec<(String, bool)>) -> Self {
-        FsvInfo { title, videos, scripts, subtitles }
+    fn new(title: String, videos: Vec<(String, bool)>, scripts: Vec<(String, bool)>, subtitles: Vec<(String, bool)>, extra_files: Vec<String>) -> Self {
+        FsvInfo { title, videos, scripts, subtitles, extra_files }
     }
 }
 
+// TODO: Add parameter for extracting other info such as creators, tags, etc.
 pub fn get_fsv_info(path: &Path) -> Result<FsvInfo, FsvError> {
     let (mut archive, metadata) = open_fsv(path)?;
     let title = if metadata.title.trim().is_empty() {
@@ -858,25 +860,38 @@ pub fn get_fsv_info(path: &Path) -> Result<FsvInfo, FsvError> {
         metadata.title.to_string()
     };
 
+    let mut seen_files = HashSet::new();
     let mut videos = Vec::new();
     for video in &metadata.video_formats {
         let is_present = archive.by_name(&video.name).is_ok();
         videos.push((video.name.to_string(), is_present));
+        seen_files.insert(video.name.to_string());
     }
 
     let mut scripts = Vec::new();
     for variant in &metadata.script_variants {
         let is_present = archive.by_name(&variant.name).is_ok();
         scripts.push((variant.name.to_string(), is_present));
+        seen_files.insert(variant.name.to_string());
     }
 
     let mut subtitles = Vec::new();
     for track in &metadata.subtitle_tracks {
         let is_present = archive.by_name(&track.name).is_ok();
         subtitles.push((track.name.to_string(), is_present));
+        seen_files.insert(track.name.to_string());
+    }
+
+    let mut extra_files = Vec::new();
+    for i in 0..archive.len() {
+        let file = archive.by_index(i)?;
+        let file_name = file.name();
+        if !seen_files.contains(file_name) {
+            extra_files.push(file_name.to_string());
+        }
     }
     
-    Ok(FsvInfo::new(title, videos, scripts, subtitles))
+    Ok(FsvInfo::new(title, videos, scripts, subtitles, extra_files))
 }
 
 #[derive(Debug, Error)]
