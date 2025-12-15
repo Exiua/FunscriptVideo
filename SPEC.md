@@ -52,7 +52,7 @@ An `.fsv` file is a ZIP archive with a **flat directory structure**.
 All files **MUST** appear at the root of the archive, and subdirectories **MUST NOT** be used.
 
 Video, script, and subtitle filenames shown in the examples are illustrative only;  
-actual filenames are **implementation-defined** but **MUST exactly match** the corresponding `name` fields declared in `metadata.json`.
+actual filenames are **user-defined** but **MUST exactly match** the corresponding `name` fields declared in `metadata.json`.
 
 A valid `.fsv` archive has the following structure:
 
